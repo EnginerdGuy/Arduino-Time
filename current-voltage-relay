@@ -1,0 +1,104 @@
+#include <LiquidCrystal.h>
+
+
+const int relayPin = 7; // Relay control pin
+const int currentSensorPin = A0; // ACS712 OUT connected to A0
+const int voltageSensorPin = A1; // ZMPT101B OUT connected to A1
+const float currentThreshold = 2.5; // Current threshold in Amps, adjust as needed
+const int buttonPin = 2; // Button pin
+
+// LCD pin configuration
+const int rs = 8, en = 9, d4 = 10, d5 = 11, d6 = 12, d7 = 13;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+bool relayState = false; // Tracks the current state of the relay
+bool lastButtonState = HIGH; // Last reading from the button pin
+bool manualResetRequired = false; // Indicates if manual reset is required (button press)
+
+void setup() {
+  Serial.begin(57600);
+  pinMode(relayPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP); // Enable internal pull-up resistor
+  digitalWrite(relayPin, relayState ? LOW : HIGH); // Initialize relay according to relayState
+
+  lcd.begin(16, 2); // Initialize the LCD
+  lcd.print("Current:Voltage:");
+}
+
+void loop() {
+  static unsigned long lastDebounceTime = 0; // For debouncing the button press
+  static unsigned long lastUpdateTime = 0; // For controlling the update rate of the display
+  const unsigned long debounceDelay = 50; // Debounce delay in milliseconds
+  const unsigned long updateInterval = 1000; // Update interval for the display and readings
+  static bool buttonPressed = false; // Flag to indicate if the button has been pressed
+
+  // Read the button state
+  bool currentButtonState = digitalRead(buttonPin);
+
+  // Check for button state change with debouncing
+  if (millis() - lastDebounceTime > debounceDelay) {
+    // If button is pressed (LOW is pressed if using INPUT_PULLUP)
+    if (currentButtonState == LOW && !buttonPressed) {
+      lastDebounceTime = millis(); // Update the last debounce time
+      buttonPressed = true; // Mark as button pressed
+      // Toggle relay only on button press
+      if (manualResetRequired) {
+        relayState = true;
+        manualResetRequired = false;
+      } else {
+        relayState = !relayState; // Toggle relay state
+      }
+      digitalWrite(relayPin, relayState ? LOW : HIGH);
+    } else if (currentButtonState == HIGH && buttonPressed) {
+      // Reset button press flag when button is released
+      buttonPressed = false;
+    }
+  }
+
+  // Periodically update the current reading and display
+  if (millis() - lastUpdateTime > 1000) { // 1 second interval
+    lastUpdateTime = millis();
+
+    float currentReading = getCurrentReading();
+    float voltageReading = readACVoltage();
+
+    // Display current and voltage on Serial and LCD
+    Serial.print("Current: ");
+    Serial.print(currentReading, 2);
+    Serial.print(" A, Voltage: ");
+    Serial.print(voltageReading, 2);
+    Serial.println(" V");
+
+    lcd.setCursor(0, 1); // Move to the second row
+    lcd.print("I:");
+    lcd.print(currentReading, 2);
+    lcd.print("A V:");
+    lcd.print(voltageReading, 2);
+    lcd.print("V ");
+
+    if (currentReading > currentThreshold && relayState) {
+      digitalWrite(relayPin, LOW);
+      relayState = false;
+      manualResetRequired = true;
+    }
+  }
+}
+
+float getCurrentReading() {
+  int sensorValue = analogRead(currentSensorPin);
+  float voltage = sensorValue * (5.0 / 1023.0); // Convert to voltage
+  float current = (voltage - 2.5) / 0.5; // Convert voltage to current
+  return current;
+}
+
+float readACVoltage() {
+  int sensorValue = analogRead(voltageSensorPin);
+  float voltage = sensorValue * (5.0 / 1023.0); // Convert the analog reading to voltage
+
+  // Calibrate and convert to AC voltage
+  // Note: This calibration factor (e.g., "11.0" here) needs to be adjusted based on your module and measurements
+  float calibrationFactor = 47.9; // Placeholder value, adjust this based on your calibration
+  float acVoltage = voltage * calibrationFactor;
+
+  return acVoltage;
+}
