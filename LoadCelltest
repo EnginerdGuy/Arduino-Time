@@ -1,0 +1,100 @@
+#include <HX711_ADC.h>
+#include <LiquidCrystal.h>
+#if defined(ESP8266) || defined(ESP32) || defined(AVR)
+#include <EEPROM.h>
+#endif
+
+// Pins:
+const int HX711_dout = 5; // MCU > HX711 dout pin
+const int HX711_sck = 6; // MCU > HX711 sck pin
+const int relayPin = 7; // Define the relay control pin
+
+// HX711 constructor:
+HX711_ADC LoadCell(HX711_dout, HX711_sck);
+
+// LCD pin configuration
+const int rs = 8, en = 9, d4 = 10, d5 = 11, d6 = 12, d7 = 13;
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+const int calVal_eepromAdress = 0;
+unsigned long t = 0;
+const int serialPrintInterval = 500; // Increase value to slow down serial print activity
+const float weightThreshold = 1000.0; // Set your weight threshold here
+
+void setup() {
+  Serial.begin(57600); delay(10);
+  Serial.println();
+  Serial.println("Starting...");
+
+  pinMode(relayPin, OUTPUT); // Initialize the relay pin as an output
+  digitalWrite(relayPin, HIGH); // Start with the relay deactivated
+
+  lcd.begin(16, 2); // Initialize the LCD
+  lcd.print("Load_cell val:");
+
+  LoadCell.begin();
+  unsigned long stabilizingtime = 2000; // Tare precision can be improved with some stabilizing time
+  boolean _tare = true; // Set this to false if you don't want tare to be performed in the next step
+  LoadCell.start(stabilizingtime, _tare);
+  if (LoadCell.getTareTimeoutFlag()) {
+    Serial.println("Timeout, check MCU>HX711 wiring and pin designations");
+  } else {
+    float calibrationValue = 696.0; // Set this to your known calibration value
+    LoadCell.setCalFactor(calibrationValue); // Set calibration factor (float)
+    Serial.println("Startup is complete");
+  }
+
+  // Wait for LoadCell to be ready with a timeout mechanism
+  unsigned long timeout = millis();
+  while (!LoadCell.update()) {
+    if (millis() - timeout > 5000) { // Timeout after 5 seconds
+      Serial.println("LoadCell update timeout - Proceeding with calibration value.");
+      break;
+    }
+  }
+  Serial.print("Calibration value: ");
+  Serial.println(LoadCell.getCalFactor());
+}
+
+void loop() {
+  static boolean newDataReady = 0;
+
+  // Check for new data/start next conversion:
+  if (LoadCell.update()) newDataReady = true;
+
+  // Get smoothed value from the dataset:
+  if (newDataReady) {
+    if (millis() > t + serialPrintInterval) {
+      float i = LoadCell.getData();
+      Serial.print("Load_cell output val: ");
+      Serial.println(i);
+
+      // Display the same value on the LCD
+      lcd.clear(); // Clear the LCD to prevent overlap of previous readings
+      lcd.setCursor(0, 1); // Move to the start of the second line
+      lcd.print("Val: ");
+      lcd.print(i, 2); // Print with 2 decimal places
+
+      // Control the relay based on the load cell's output
+      if(i > weightThreshold) {
+          digitalWrite(relayPin, LOW); // Assuming LOW activates the relay
+      } else {
+          digitalWrite(relayPin, HIGH); // Keep the relay deactivated
+      }
+
+      newDataReady = 0;
+      t = millis();
+    }
+  }
+
+  // Receive command from serial terminal, send 't' to initiate tare operation:
+  if (Serial.available() > 0) {
+    char inByte = Serial.read();
+    if (inByte == 't') LoadCell.tareNoDelay();
+  }
+
+  // Check if last tare operation is complete:
+  if (LoadCell.getTareStatus() == true) {
+    Serial.println("Tare complete");
+  }
+}
