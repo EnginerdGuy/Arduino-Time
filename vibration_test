@@ -1,0 +1,19 @@
+// Define the pin where the sensor is connected
+const int sensorPin = A15;
+
+void setup() {
+  // Initialize Serial communication at 9600 baud rate
+  Serial.begin(9600);
+}
+
+void loop() {
+  // Read the value from the vibration sensor
+  int sensorValue = analogRead(sensorPin);
+
+  // Print the sensor value to the Serial Monitor
+  Serial.print("Vibration Sensor Value: ");
+  Serial.println(sensorValue);
+
+  // Delay a bit to make the output readable
+  delay(100);
+}
